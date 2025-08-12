@@ -1,54 +1,74 @@
 from __future__ import print_function, division
 import numpy as np
 import os
-import cv2
-from PIL import Image
-import random
-from functools import partial
 
-import tensorflow as tf
-from keras.models import Model, Sequential, load_model
-from keras.layers.merge import _Merge
-from keras.layers import Input, Conv2D, MaxPooling2D, ZeroPadding2D, Conv2D, BatchNormalization, UpSampling2D, Activation
-from keras.layers import Reshape, Dropout, Concatenate, Lambda, Multiply, Add, Flatten, Dense
-from keras_contrib.layers.normalization.instancenormalization import InstanceNormalization
-from keras.layers.advanced_activations import LeakyReLU, PReLU
-from keras.optimizers import Adam
-from keras import backend as K
-import keras
-import cv2
-from sklearn.utils import shuffle
-import random
 import datetime
-from keras.applications.vgg16 import VGG16
-from keras.applications.vgg19 import VGG19
-from keras.applications.resnet50 import ResNet50
-import math
-from skimage.measure import compare_psnr, compare_ssim
-from keras.utils import multi_gpu_model
+
+# --- Third-Party Library Imports ---
+import cv2
+import numpy as np  # It's very likely your code uses numpy, good to have.
+import tensorflow as tf
 from scipy.stats import pearsonr
+from skimage.metrics import peak_signal_noise_ratio as compare_psnr
+from skimage.metrics import structural_similarity as compare_ssim
+
+# --- TensorFlow & Keras Specific Imports ---
+from tensorflow.keras.applications.vgg19 import VGG19
+from tensorflow.keras.layers import (
+    Input,
+    Conv2D,
+    BatchNormalization,
+    UpSampling2D,
+    Activation,
+    Add,
+    Dense,
+    LeakyReLU,
+    Layer
+)
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.optimizers import Adam
+# from tensorflow.keras.utils import multi_gpu_model
+# Add these lines right after your imports
+from instance_normalisation import InstanceNormalization
+
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(e)
+
+
+
+
 
 def load_confocal(input_shape=None, set=None, z_depth=None):
-    dir = './confocal/' + set
+    dir = '/imgarc/nila/data/Super_Res/all_data/random_test_data/COMI/dataset/' + set
     lr_lq_set = []
     hr_lq_set = []
     lr_hq_set = []
     hr_hq_set = []
-    for _, _, files in os.walk(dir+'/'+z_depth):
-        for file in files:
-            if int(file.split('_')[-1].split('.')[0]) < len(files) * 0.8:
-                img_lq = cv2.imread(dir+'/'+z_depth + '/' + file)
-                img = cv2.resize(img_lq, (input_shape[0], input_shape[1]))
-                lr_lq_set.append(img)
-                img = cv2.resize(img_lq, (input_shape[0]*4, input_shape[1]*4))
-                hr_lq_set.append(img)
+    # for _, _, files in os.walk(dir+'/'+z_depth):
+    #     for file in files:
+    #         # if int(file.split('_')[-1].split('.')[0]) < len(files) * 0.8:
+    #         img_lq = cv2.imread(dir+'/'+z_depth + '/' + file)
+    #         img = cv2.resize(img_lq, (input_shape[0], input_shape[1]))
+    #         lr_lq_set.append(img)
+    #         img = cv2.resize(img_lq, (input_shape[0]*4, input_shape[1]*4))
+    #         hr_lq_set.append(img)
 
-                file = 'Z7_' + file.split('_')[1]
-                img_hq = cv2.imread(dir+'/Z007' + '/' + file)
-                img = cv2.resize(img_hq, (input_shape[0]*4, input_shape[1]*4))
-                hr_hq_set.append(img)
-                img = cv2.resize(img_hq, (input_shape[0], input_shape[1]))
-                lr_hq_set.append(img)
+    #         # file = 'Z7_' + file.split('_')[1]
+    #         img_hq = cv2.imread(dir+'/Z007' + '/' + file)
+    #         img = cv2.resize(img_hq, (input_shape[0]*4, input_shape[1]*4))
+    #         hr_hq_set.append(img)
+    #         img = cv2.resize(img_hq, (input_shape[0], input_shape[1]))
+    #         lr_hq_set.append(img)
     hrhq, lrhq, hrlq, lrlq = hr_hq_set, lr_hq_set, hr_lq_set, lr_lq_set
 
     hrhq_train = hrhq
@@ -62,19 +82,19 @@ def load_confocal(input_shape=None, set=None, z_depth=None):
     hr_hq_set = []
     for _, _, files in os.walk(dir+'/'+z_depth):
         for file in files:
-            if int(file.split('_')[-1].split('.')[0]) >= len(files) * 0.8:
-                img_lq = cv2.imread(dir+'/'+z_depth + '/' + file)
-                img = cv2.resize(img_lq, (input_shape[0], input_shape[1]))
-                lr_lq_set.append(img)
-                img = cv2.resize(img_lq, (input_shape[0]*4, input_shape[1]*4))
-                hr_lq_set.append(img)
+            # if int(file.split('_')[-1].split('.')[0]) >= len(files) * 0.8:
+            img_lq = cv2.imread(dir+'/'+z_depth + '/' + file)
+            img = cv2.resize(img_lq, (input_shape[0], input_shape[1]))
+            lr_lq_set.append(img)
+            img = cv2.resize(img_lq, (input_shape[0]*4, input_shape[1]*4))
+            hr_lq_set.append(img)
 
-                file = 'Z7_' + file.split('_')[1]
-                img_hq = cv2.imread(dir+'/Z007' + '/' + file)
-                img = cv2.resize(img_hq, (input_shape[0]*4, input_shape[1]*4))
-                hr_hq_set.append(img)
-                img = cv2.resize(img_hq, (input_shape[0], input_shape[1]))
-                lr_hq_set.append(img)
+            # file = 'Z7_' + file.split('_')[1]
+            img_hq = cv2.imread(dir+'/Z007' + '/' + file)
+            img = cv2.resize(img_hq, (input_shape[0]*4, input_shape[1]*4))
+            hr_hq_set.append(img)
+            img = cv2.resize(img_hq, (input_shape[0], input_shape[1]))
+            lr_hq_set.append(img)
 
     hrhq, lrhq, hrlq, lrlq = hr_hq_set, lr_hq_set, hr_lq_set, lr_lq_set
 
@@ -107,14 +127,15 @@ def load_confocal(input_shape=None, set=None, z_depth=None):
     print(hrhq_test.shape)
     return hrhq_train, hrhq_test, lrhq_train, lrhq_test, hrlq_train, hrlq_test, lrlq_train, lrlq_test
 
-class RandomWeightedAverage(_Merge):
+# Replace it with this new version.
+class RandomWeightedAverage(Layer):
     """Provides a (random) weighted average between real and generated image samples"""
+    def __init__(self, batch_size):
+        super().__init__()
+        self.batch_size = batch_size
 
-    def define_batch_size(self, bs):
-        self.bs = bs
-
-    def _merge_function(self, inputs):
-        alpha = K.random_uniform((self.bs, 1, 1, 1))
+    def call(self, inputs, **kwargs):
+        alpha = tf.random.uniform((self.batch_size, 1, 1, 1))
         return (alpha * inputs[0]) + ((1 - alpha) * inputs[1])
 
 
@@ -184,16 +205,27 @@ class StarGAN(object):
 
         self.combined_hq = Model([img_lq, img_hq], [validity_hq, validity_reconstr_lq,
                                                     fake_hq_features, reconstr_lq_features, img_lq_id])
-        self.combined_hq_m = multi_gpu_model(self.combined_hq, gpus=4)
-        self.combined_hq_m.compile(loss=['mse', 'mse', 'mse', 'mse', 'mse'],
-                                   loss_weights=[1e-3, 1e-3, 1, 1, 1],
-                                   optimizer=optimizer)
-        self.combined_lq = Model([img_lq, img_hq], [validity_lq, validity_reconstr_hq,
-                                                    fake_lq_features, reconstr_hq_features, img_hq_id])
-        self.combined_lq_m = multi_gpu_model(self.combined_lq, gpus=4)
-        self.combined_lq_m.compile(loss=['mse', 'mse', 'mse', 'mse', 'mse'],
-                                   loss_weights=[1e-3, 1e-3, 1, 1, 1],
-                                   optimizer=optimizer)
+        # 1. COMMENT OUT the multi_gpu_model line
+        # self.combined_hq_m = multi_gpu_model(self.combined_hq, gpus=4)
+
+        # 2. CHANGE self.combined_hq_m to self.combined_hq in the compile call
+        self.combined_hq.compile(loss=['mse', 'mse', 'mse', 'mse', 'mse'],
+                                loss_weights=[1e-3, 1e-3, 1, 1, 1],
+                                optimizer=optimizer)
+
+
+        # --- THE FIX FOR THE SECOND MODEL ---
+
+        # The line where you create self.combined_lq stays the same
+        self.combined_lq = Model([img_lq, img_hq], [validity_lq, validity_reconstr_hq, fake_lq_features, reconstr_hq_features, img_hq_id])
+
+        # 3. COMMENT OUT the multi_gpu_model line
+        # self.combined_lq_m = multi_gpu_model(self.combined_lq, gpus=4)
+
+        # 4. CHANGE self.combined_lq_m to self.combined_lq in the compile call
+        self.combined_lq.compile(loss=['mse', 'mse', 'mse', 'mse', 'mse'],
+                                loss_weights=[1e-3, 1e-3, 1, 1, 1],
+                                optimizer=optimizer)
 
     def build_vgg_hr(self, name=None):
         """
@@ -201,8 +233,9 @@ class StarGAN(object):
         third block of the model
         """
 
-        vgg = VGG19(include_top=False, weights="./model/vgg19_weights_tf_dim_ordering_tf_kernels_notop.h5")
-        vgg.outputs = [vgg.layers[9].output]
+        vgg = VGG19(include_top=False, weights="./model_weights/vgg19_weights_tf_dim_ordering_tf_kernels_notop.h5")
+        # NEW, CORRECT CODE
+        vgg = Model(inputs=vgg.input, outputs=vgg.layers[9].output)
         img = Input(shape=self.hr_shape)
 
         # Extract image features
@@ -355,7 +388,7 @@ class StarGAN(object):
         print('save_model reconstr hrhq : ')
         self.compute(hrhq_test, reconstr_hrhq)
 
-        dir = './confocal/' + set + '/' + z_depth
+        dir = '/imgarc/nila/data/Super_Res/all_data/random_test_data/COMI/dataset/' + set + '/' + z_depth
         num = 0
         for _, _, files in os.walk(dir):
             for file in files:
@@ -366,8 +399,14 @@ class StarGAN(object):
                 img.append(img_lq)
                 img = np.array(img)
                 img = img.astype('float32') / 127.5 - 1.
-                img = lq2hq.predict(img, batch_size=1)
-                cv2.imwrite(output_dir + '/' + file, (0.5 * img[0] + 0.5) * 255)
+                predicted_img_large = lq2hq.predict(img, batch_size=1)
+                predicted_img_small = cv2.resize(predicted_img_large[0], (input_shape[0], input_shape[1]))
+                # =========================================================
+                
+                # Now, de-normalize and save the SMALL resized image
+                predicted_img_small = (0.5 * predicted_img_small + 0.5) * 255
+                predicted_img_large = predicted_img_large.clip(0, 255)
+                cv2.imwrite(output_dir + '/' + file, predicted_img_small.astype('uint8'))
 
     def compute(self, set1, set2):
         PSNR = 0
@@ -391,11 +430,11 @@ class StarGAN(object):
     def PSNR(self, img1, img2):
         psnr = 0
         for i in range(img1.shape[2]) :
-            psnr += compare_psnr(img1[:,:,i], img2[:,:,i], 1)
+            psnr += compare_psnr(img1[:,:,i], img2[:,:,i])
         return psnr / img1.shape[2]
 
     def SSIM(self, img1, img2):
-        return compare_ssim(img1, img2, data_range=1, multichannel=True)
+        return compare_ssim(img1, img2, data_range=1, channel_axis=-1)
 
 if __name__ == '__main__':
     # acgan + mnist dataset
@@ -405,7 +444,9 @@ if __name__ == '__main__':
     epoch = 25000
     set = 'C0depth'
     z_depth = 'Z005'
-    model = 'deblursrgan4' + '_' + set + '_' + z_depth
+    model = 'model'
     batch_size = 4
     dcgan.test(model=model, epochs=epoch, batch_size=batch_size, sample_interval=int(epoch / save_num), set=set,
                 z_depth=z_depth)
+
+
